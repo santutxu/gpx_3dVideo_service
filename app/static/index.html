@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cumbre · Vídeos 3D de tus rutas</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff5c1e'/%3E%3Cpath d='M5 24l8-13 4 6 3-4 7 11z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+
+<!-- Pantalla de acceso -->
+<section id="auth" class="auth" hidden>
+  <div class="auth-hero">
+    <div class="brand"><span class="logo" aria-hidden="true"></span>Cumbre</div>
+    <h1>Tus rutas, en 3D sobre el relieve real.</h1>
+    <p>Sube un GPX y obtén un vídeo animado con imagen satélite, perfil de altitud y las métricas de tu salida.</p>
+  </div>
+  <div class="auth-panel">
+    <form id="auth-form" class="card auth-card" novalidate>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="tab-login" aria-selected="true">Iniciar sesión</button>
+        <button type="button" role="tab" id="tab-register" aria-selected="false">Crear cuenta</button>
+      </div>
+      <label>Usuario
+        <input id="auth-user" name="username" autocomplete="username" required minlength="3" maxlength="32">
+      </label>
+      <label>Contraseña
+        <input id="auth-pass" name="password" type="password" autocomplete="current-password" required minlength="8">
+      </label>
+      <label id="auth-pass2-row" hidden>Repite la contraseña
+        <input id="auth-pass2" type="password" autocomplete="new-password" minlength="8">
+      </label>
+      <p id="auth-hint" class="hint" hidden>Entre 3 y 32 caracteres (letras, números, - y _). Contraseña de 8 o más.</p>
+      <p id="auth-error" class="error" role="alert"></p>
+      <button id="auth-submit" class="btn primary block" type="submit">Entrar</button>
+    </form>
+  </div>
+</section>
+
+<!-- Aplicación -->
+<div id="app" class="app" hidden>
+  <aside class="sidebar">
+    <div class="brand"><span class="logo" aria-hidden="true"></span>Cumbre</div>
+    <nav id="nav" aria-label="Secciones">
+      <button data-view="home"><span class="ico ico-home" aria-hidden="true"></span>Inicio</button>
+      <button data-view="routes"><span class="ico ico-routes" aria-hidden="true"></span>Rutas</button>
+      <button data-view="upload"><span class="ico ico-upload" aria-hidden="true"></span>Nuevo vídeo</button>
+      <button data-view="keys"><span class="ico ico-key" aria-hidden="true"></span>Claves de API</button>
+      <button data-view="account"><span class="ico ico-user" aria-hidden="true"></span>Cuenta</button>
+      <button data-view="users" id="nav-users" hidden><span class="ico ico-users" aria-hidden="true"></span>Usuarios</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="who"><span id="avatar" class="avatar"></span>
+        <span><strong id="who-name"></strong><small id="who-role"></small></span></div>
+      <button id="logout" class="btn ghost small">Salir</button>
+    </div>
+  </aside>
+  <main id="main" tabindex="-1"></main>
+</div>
+
+<dialog id="confirm" class="dialog">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text"></p>
+    <div class="dialog-actions">
+      <button class="btn" value="cancel">Cancelar</button>
+      <button id="confirm-ok" class="btn danger" value="ok">Borrar</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="prompt" class="dialog">
+  <form method="dialog">
+    <h2 id="prompt-title"></h2>
+    <p id="prompt-text"></p>
+    <input id="prompt-input" class="dialog-input" autocomplete="new-password" aria-labelledby="prompt-title">
+    <div class="dialog-actions">
+      <button class="btn" value="cancel" formnovalidate>Cancelar</button>
+      <button id="prompt-ok" class="btn primary" value="ok">Guardar</button>
+    </div>
+  </form>
+</dialog>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="static/app.js"></script>
+</body>
+</html>
