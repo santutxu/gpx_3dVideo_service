@@ -252,24 +252,39 @@ class SimulatedEngine:
             d.text((cx - vw // 2, cy + h * 0.04), val, font=f_title, fill=(255, 255, 255, 255))
 
     def render_intro(self, payload: RenderPayload, frames_dir: Path, on_progress: ProgressCallback | None) -> None:
+        """Intro simulada: overview lejano → zoom al punto de salida ajustado al camera_style inicial."""
         w, h = payload.width, payload.height
         fps = payload.fps
         xs, ys, _, _ = self._sim_base(payload)
         frames_dir.mkdir(parents=True, exist_ok=True)
-        # Cálculo de escalas
         margin = h * 0.08
         map_h = h * 0.74
         span_x, span_y = max(np.ptp(xs), 1.0), max(np.ptp(ys), 1.0)
         scale_overview = min((w - 2 * margin) / span_x, (map_h - 2 * margin) / span_y)
+        # overview lejano: 55% del overview → se ve ~1.8× más terreno alrededor
+        scale_far = scale_overview * 0.55
         center_ov_x = float((xs.min() + xs.max()) / 2)
         center_ov_y = float((ys.min() + ys.max()) / 2)
         center_start_x = float(xs[0])
         center_start_y = float(ys[0])
-        zoom_factor = 5.0
-        scale_close = scale_overview * zoom_factor
-        # Duraciones
+        # Escala de cierre ajustada al estilo: overhead no hace zoom (evita salto con tracking estático)
+        # follow/orbit cierran a 3.2× overview; overhead se queda en overview (sin salto)
+        style = payload.camera.style
+        if style.value == "overhead":
+            scale_close = scale_overview  # sin zoom, solo centrado
+            close_cx, close_cy = center_ov_x, center_ov_y
+            # pero para que se note zoom, usamos ligero acercamiento 1.3× manteniendo centro
+            scale_close = scale_overview * 1.25
+        elif style.value == "orbit":
+            scale_close = scale_overview * 3.0
+            close_cx, close_cy = center_start_x, center_start_y
+        else:  # follow
+            scale_close = scale_overview * 3.4
+            close_cx, close_cy = center_start_x, center_start_y
+        # Para overhead el centro final es overview (no salto), para follow/orbit es el punto de salida
+        if style.value == "overhead":
+            close_cx, close_cy = center_ov_x, center_ov_y
         from .config import get_settings as _gs
-
         s = _gs()
         n = int(round(s.cinematic_intro_s * fps))
         hold = int(round(1.0 * fps))
@@ -277,7 +292,6 @@ class SimulatedEngine:
         line_w = max(h // 200, 2)
         radius = max(h // 70, 6)
         font = ImageFont.load_default(size=max(h // 36, 12))
-        # Bucle
         for i in range(n):
             check_deadline()
             if i < hold:
@@ -285,30 +299,30 @@ class SimulatedEngine:
             else:
                 t = (i - hold) / max(zoom_n - 1, 1)
                 t = self._ease(t)
-            cx_w = center_ov_x + (center_start_x - center_ov_x) * t
-            cy_w = center_ov_y + (center_start_y - center_ov_y) * t
-            sc = scale_overview + (scale_close - scale_overview) * t
-            # Transformar todos los puntos a pantalla
+            # Interpolación híbrida: centro y escala con ease
+            cx_w = center_ov_x + (close_cx - center_ov_x) * t
+            cy_w = center_ov_y + (close_cy - center_ov_y) * t
+            sc = scale_far + (scale_close - scale_far) * t
             px = w / 2 + (xs - cx_w) * sc
             py = map_h / 2 - (ys - cy_w) * sc
             track_pts = list(zip(px.tolist(), py.tolist()))
             img = Image.new("RGB", (w, h), self._BG)
             d = ImageDraw.Draw(img)
-            # ruta blanca completa
             d.line(track_pts, fill=self._WHITE_ROUTE, width=line_w + 1, joint="curve")
-            # marcador inicio
+            # marcador inicio: en el punto de salida (centro final cuando t=1 queda centrado)
             sx = w / 2 + (center_start_x - cx_w) * sc
             sy = map_h / 2 - (center_start_y - cy_w) * sc
-            # pulso durante zoom
             r = radius + int(2 * t) if t > 0 else radius
             d.ellipse((sx - r, sy - r, sx + r, sy + r), fill=(255, 255, 255), outline=(255, 92, 30), width=3)
-            # HUD minimal
-            d.text((margin, margin * 0.4), "Inicio", fill=self._TEXT, font=font)
+            # HUD estilo
+            label = {"follow": "Inicio · Follow", "orbit": "Inicio · Orbit", "overhead": "Inicio · Cenital"}.get(style.value, "Inicio")
+            d.text((margin, margin * 0.4), label, fill=self._TEXT, font=font)
             img.save(frames_dir / FRAME_NAME.format(i), format="PNG", compress_level=1)
             if on_progress and (i % 15 == 0 or i == n - 1):
                 on_progress(i + 1, n)
 
     def render_outro(self, payload: RenderPayload, frames_dir: Path, on_progress: ProgressCallback | None) -> None:
+        """Outro simulado: comienza donde acabó el tracking → zoom-out a overview lejano."""
         w, h = payload.width, payload.height
         fps = payload.fps
         xs, ys, _, _ = self._sim_base(payload)
@@ -317,22 +331,30 @@ class SimulatedEngine:
         map_h = h * 0.74
         span_x, span_y = max(np.ptp(xs), 1.0), max(np.ptp(ys), 1.0)
         scale_overview = min((w - 2 * margin) / span_x, (map_h - 2 * margin) / span_y)
+        scale_far = scale_overview * 0.55
         center_ov_x = float((xs.min() + xs.max()) / 2)
         center_ov_y = float((ys.min() + ys.max()) / 2)
         center_end_x = float(xs[-1])
         center_end_y = float(ys[-1])
-        zoom_factor = 5.0
-        scale_close = scale_overview * zoom_factor
+        style = payload.camera.style
+        if style.value == "overhead":
+            scale_close = scale_overview * 1.25
+            close_cx, close_cy = center_ov_x, center_ov_y
+        elif style.value == "orbit":
+            scale_close = scale_overview * 3.0
+            close_cx, close_cy = center_end_x, center_end_y
+        else:
+            scale_close = scale_overview * 3.4
+            close_cx, close_cy = center_end_x, center_end_y
+        if style.value == "overhead":
+            close_cx, close_cy = center_ov_x, center_ov_y
         from .config import get_settings as _gs
-
         s = _gs()
         n = int(round(s.cinematic_outro_s * fps))
-        # 2s zoom + resto hold con stats (al menos 1s)
         zoom_n = int(round(2.0 * fps))
         if zoom_n > n - 15:
             zoom_n = max(n - 30, 1)
-        hold_n = n - zoom_n
-        stats_start = n - int(round(1.5 * fps))  # últimos 1.5s con panel visible
+        stats_start = n - int(round(1.5 * fps))
         line_w = max(h // 200, 2)
         radius = max(h // 70, 6)
         font = ImageFont.load_default(size=max(h // 36, 12))
@@ -341,26 +363,25 @@ class SimulatedEngine:
             if i < zoom_n:
                 t = i / max(zoom_n - 1, 1)
                 t = self._ease(t)
-                cx_w = center_end_x + (center_ov_x - center_end_x) * t
-                cy_w = center_end_y + (center_ov_y - center_end_y) * t
-                sc = scale_close + (scale_overview - scale_close) * t
+                # Outro: de close (igual que último frame tracking) a far overview lejano
+                cx_w = close_cx + (center_ov_x - close_cx) * t
+                cy_w = close_cy + (center_ov_y - close_cy) * t
+                sc = scale_close + (scale_far - scale_close) * t
             else:
-                cx_w, cy_w, sc = center_ov_x, center_ov_y, scale_overview
+                cx_w, cy_w, sc = center_ov_x, center_ov_y, scale_far
             px = w / 2 + (xs - cx_w) * sc
             py = map_h / 2 - (ys - cy_w) * sc
             track_pts = list(zip(px.tolist(), py.tolist()))
             img = Image.new("RGB", (w, h), self._BG)
             d = ImageDraw.Draw(img)
-            # ruta naranja completa
             d.line(track_pts, fill=self._DONE, width=line_w + 1, joint="curve")
-            # marcador final durante el zoom
             if i < zoom_n:
                 ex = w / 2 + (center_end_x - cx_w) * sc
                 ey = map_h / 2 - (center_end_y - cy_w) * sc
                 d.ellipse((ex - radius, ey - radius, ex + radius, ey + radius), fill=(255, 92, 30), outline=(255, 255, 255), width=3)
-                d.text((margin, margin * 0.4), "Meta", fill=self._TEXT, font=font)
+                label = {"follow": "Meta · Follow", "orbit": "Meta · Orbit", "overhead": "Meta · Cenital"}.get(style.value, "Meta")
+                d.text((margin, margin * 0.4), label, fill=self._TEXT, font=font)
             if i >= stats_start:
-                # fade simple: panel aparece completo
                 self._draw_stats_panel(img, payload)
             elif i >= zoom_n:
                 d.text((margin, margin * 0.4), f"{payload.metrics.total_distance_m/1000:.2f} km", fill=self._TEXT, font=font)

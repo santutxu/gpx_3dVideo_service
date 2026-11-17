@@ -292,6 +292,7 @@ class Terrain3DEngine:
 
     # --- Cinemática intro/outro ---------------------------------------
     def render_intro(self, payload: RenderPayload, frames_dir: Path, on_progress: Any | None) -> None:
+        """Intro: 1s hold overview lejano cenital → ~2s zoom al punto de salida con la cámara de inicio (sin salto)."""
         try:
             import moderngl
         except ImportError as exc:
@@ -302,44 +303,53 @@ class Terrain3DEngine:
         cfg = payload.camera
         exag = cfg.vertical_exaggeration
         extent = float(max(np.ptp(fx), np.ptp(fy)))
-        margin = max(self._settings.terrain_margin_ratio * extent, self._settings.terrain_min_margin_m, 1.5 * cfg.distance_m)
+        # margen un poco mayor para que el overview lejano no se salga del terreno
+        margin = max(self._settings.terrain_margin_ratio * extent, self._settings.terrain_min_margin_m, 1.5 * cfg.distance_m * 1.8)
         terrain = build_terrain(fx, fy, payload.origin["lat"], payload.origin["lon"], margin, self._settings)
         ground = terrain.height_at(fx, fy)
         targets_full = np.column_stack((fx, fy, ground * exag))
-        # Centro overview
+        # --- Targets / Eyes del tracking real (para continuidad perfecta) ---
+        # Reconstruir la trayectoria de cámara real del vídeo de seguimiento
+        track_targets = targets_full  # mismo que targets del tracking
+        track_eyes = self._camera_path(payload, terrain, track_targets)
+        tgt0 = track_targets[0]
+        eye0 = track_eyes[0]
+        # Centro overview lejano (más terreno visible)
         cx = float((fx.min() + fx.max()) / 2)
         cy = float((fy.min() + fy.max()) / 2)
         cz = float(terrain.height_at(np.array([cx]), np.array([cy]))[0] * exag)
         overview_target = np.array([cx, cy, cz], dtype=np.float64)
-        overview_dist = max(extent * 0.65, 800.0)
-        overview_eye = _eye_for(overview_target, overview_dist, 89.0, 0.0)
-        # Close inicio
-        start_target = targets_full[0]
-        heading0 = float(payload.frames[0].heading)
-        close_dist = float(np.clip(extent * 0.3, 700.0, 6000.0))
-        close_eye = _eye_for(start_target, close_dist, 33.0, math.radians(heading0) + math.pi)
-        # Interpolación 1s hold + zoom
+        # Distancia lejana: 1.8× extent, al menos 1.9× la del tracking para que se vea más terreno
+        overview_dist_far = max(extent * 1.85, cfg.distance_m * 1.9, 1400.0)
+        overview_eye_far = _eye_for(overview_target, overview_dist_far, 89.0, 0.0)
         fps = payload.fps
         total = int(round(self._settings.cinematic_intro_s * fps))
         hold = int(round(1.0 * fps))
         zoom_n = max(total - hold, 1)
         eyes = np.empty((total, 3), dtype=np.float64)
         trgs = np.empty((total, 3), dtype=np.float64)
+        # Interpolación de pitch/distancia/azimuth para que la inclinación sea híbrida cenital→inclinada
+        pitch0 = float(cfg.pitch_deg)
+        az0 = self._azimuth_for_frame(payload, 0)
         for i in range(total):
             if i < hold:
                 t = 0.0
             else:
                 t = (i - hold) / max(zoom_n - 1, 1)
                 t = _ease(t)
-            eyes[i] = overview_eye * (1 - t) + close_eye * t
-            trgs[i] = overview_target * (1 - t) + start_target * t
+            # target lerp
+            trgs[i] = overview_target * (1 - t) + tgt0 * t
+            # eye: lerp directo entre overview lejano y eye0 evita resolver pitch/az de forma separada
+            # pero interpolamos pitch/az vía eye para continuidad: eye0 ya tiene pitch/az correctos
+            eyes[i] = overview_eye_far * (1 - t) + eye0 * t
         ctx = self._create_context(moderngl)
         try:
-            self._render_cinematic(moderngl, ctx, payload, terrain, trgs, eyes, frames_dir, _WHITE, start_target, show_stats=False, on_progress=on_progress)
+            self._render_cinematic(moderngl, ctx, payload, terrain, trgs, eyes, frames_dir, _WHITE, tgt0, show_stats=False, on_progress=on_progress)
         finally:
             ctx.release()
 
     def render_outro(self, payload: RenderPayload, frames_dir: Path, on_progress: Any | None) -> None:
+        """Outro: comienza exactamente donde acaba el tracking → zoom-out a overview lejano + stats."""
         try:
             import moderngl
         except ImportError as exc:
@@ -350,20 +360,20 @@ class Terrain3DEngine:
         cfg = payload.camera
         exag = cfg.vertical_exaggeration
         extent = float(max(np.ptp(fx), np.ptp(fy)))
-        margin = max(self._settings.terrain_margin_ratio * extent, self._settings.terrain_min_margin_m, 1.5 * cfg.distance_m)
+        margin = max(self._settings.terrain_margin_ratio * extent, self._settings.terrain_min_margin_m, 1.5 * cfg.distance_m * 1.8)
         terrain = build_terrain(fx, fy, payload.origin["lat"], payload.origin["lon"], margin, self._settings)
         ground = terrain.height_at(fx, fy)
         targets_full = np.column_stack((fx, fy, ground * exag))
+        track_targets = targets_full
+        track_eyes = self._camera_path(payload, terrain, track_targets)
+        tgtN = track_targets[-1]
+        eyeN = track_eyes[-1]
         cx = float((fx.min() + fx.max()) / 2)
         cy = float((fy.min() + fy.max()) / 2)
         cz = float(terrain.height_at(np.array([cx]), np.array([cy]))[0] * exag)
         overview_target = np.array([cx, cy, cz], dtype=np.float64)
-        overview_dist = max(extent * 0.65, 800.0)
-        overview_eye = _eye_for(overview_target, overview_dist, 89.0, 0.0)
-        end_target = targets_full[-1]
-        headingN = float(payload.frames[-1].heading)
-        close_dist = float(np.clip(extent * 0.3, 700.0, 6000.0))
-        close_eye = _eye_for(end_target, close_dist, 33.0, math.radians(headingN) + math.pi)
+        overview_dist_far = max(extent * 1.85, cfg.distance_m * 1.9, 1400.0)
+        overview_eye_far = _eye_for(overview_target, overview_dist_far, 89.0, 0.0)
         fps = payload.fps
         total = int(round(self._settings.cinematic_outro_s * fps))
         zoom_n = int(round(2.0 * fps))
@@ -375,16 +385,26 @@ class Terrain3DEngine:
             if i < zoom_n:
                 t = i / max(zoom_n - 1, 1)
                 t = _ease(t)
-                eyes[i] = close_eye * (1 - t) + overview_eye * t
-                trgs[i] = end_target * (1 - t) + overview_target * t
+                eyes[i] = eyeN * (1 - t) + overview_eye_far * t
+                trgs[i] = tgtN * (1 - t) + overview_target * t
             else:
-                eyes[i] = overview_eye
+                eyes[i] = overview_eye_far
                 trgs[i] = overview_target
         ctx = self._create_context(moderngl)
         try:
-            self._render_cinematic(moderngl, ctx, payload, terrain, trgs, eyes, frames_dir, _ORANGE, end_target, show_stats=True, stats_start_ratio=0.62, on_progress=on_progress)
+            self._render_cinematic(moderngl, ctx, payload, terrain, trgs, eyes, frames_dir, _ORANGE, tgtN, show_stats=True, stats_start_ratio=0.62, on_progress=on_progress)
         finally:
             ctx.release()
+
+    def _azimuth_for_frame(self, payload: RenderPayload, idx: int) -> float:
+        cfg = payload.camera
+        if cfg.style is CameraStyle.FOLLOW:
+            return math.radians(float(payload.frames[idx].heading))
+        if cfg.style is CameraStyle.ORBIT:
+            # orbit_deg_per_s respecto al primer heading
+            t = float(payload.frames[idx].t)
+            return math.radians(float(payload.frames[0].heading) + cfg.orbit_deg_per_s * t)
+        return 0.0
 
     def _render_cinematic(self, moderngl: Any, ctx: Any, payload: RenderPayload, terrain: TerrainData, targets: FloatArray, eyes: FloatArray, frames_dir: Path, route_color: tuple[float, float, float, float], marker_pos: FloatArray, show_stats: bool = False, stats_start_ratio: float = 0.62, on_progress: Any | None = None) -> None:
         w, h = payload.width, payload.height
