@@ -505,7 +505,11 @@ class RendererOrchestrator:
 
     def build_payload(self, job_id: str, track: ProcessedTrack, options: RenderOptions) -> RenderPayload:
         """Construye el contrato JSON que consume el motor gráfico."""
-        width, height = options.resolution.size
+        # Soporta orientación vertical (9:16) para redes sociales
+        try:
+            width, height = options.dimensions()  # type: ignore[attr-defined]
+        except AttributeError:
+            width, height = options.resolution.size
         camera = _camera_config(options.camera_style, track)
         cam = _camera_positions(camera, track)
         frames = [

@@ -234,9 +234,12 @@ function jobRow(job) {
 function routeCard(video) {
   const m = video.metrics;
   const metric = (label, value) => h("div", {}, h("small", { text: label }), h("b", { text: value }));
-  const info = `${video.height}p · ${num(video.size_bytes / 1e6, 1)} MB` + (video.moment_count ? ` · ${video.moment_count} ${video.moment_count === 1 ? "momento" : "momentos"}` : "") + (state.user.is_admin && video.owner && video.owner !== state.user.name ? ` · ${video.owner}` : "");
-  return h("article", { class: "card route" },
-    h("video", { controls: true, preload: "metadata", playsInline: true, src: `${API}/videos/${video.video_id}/stream` }),
+  const orient = video.options.orientation === "vertical" ? "Vertical 9:16" : "Horizontal 16:9";
+  const resLabel = `${video.width}×${video.height} · ${orient}`;
+  const info = `${resLabel} · ${num(video.size_bytes / 1e6, 1)} MB` + (video.moment_count ? ` · ${video.moment_count} ${video.moment_count === 1 ? "momento" : "momentos"}` : "") + (state.user.is_admin && video.owner && video.owner !== state.user.name ? ` · ${video.owner}` : "");
+  const isVertical = video.options.orientation === "vertical";
+  return h("article", { class: "card route" + (isVertical ? " vertical" : "") },
+    h("video", { controls: true, preload: "metadata", playsInline: true, src: `${API}/videos/${video.video_id}/stream`, style: isVertical ? "aspect-ratio: 9 / 16; max-height: 560px; object-fit: contain; background:#000" : "" }),
     h("div", { class: "route-body" },
       h("div", {}, h("h3", { text: video.title }),
         h("time", { text: m.start_time ? `Ruta del ${dateOnly(m.start_time)}` : `Creado el ${dateOnly(video.created_at)}` })),
@@ -550,6 +553,10 @@ function renderUpload() {
     drop.classList.add("has-file");
     dropTitle.textContent = f.name;
     dropHint.textContent = `${num(f.size / 1024)} kB · haz clic para cambiarlo`;
+    // sugerir título a partir del nombre del archivo si está vacío
+    if (!titleInput.value.trim()) {
+      titleInput.value = f.name.replace(/\.gpx$/i, "").replace(/[_-]+/g, " ").trim().slice(0, 120);
+    }
     moments.splice(0).forEach(m => URL.revokeObjectURL(m.url));
     list.replaceChildren(); closeEditor();
     if (activeMap) { activeMap.destroy(); activeMap = null; }
@@ -573,6 +580,8 @@ function renderUpload() {
   const speedOut = h("output", { text: "1×" });
   const speed = h("input", { type: "range", min: 0.5, max: 4, step: 0.25, value: 1, "aria-label": "Velocidad de la animación",
     oninput: () => { speedOut.textContent = `${num(Number(speed.value), 2).replace(/,?0+$/, "")}×`; } });
+  const titleInput = h("input", { type: "text", name: "title", maxLength: 120, placeholder: "Ej: Gorbea invernal · 12 km", autocomplete: "off" });
+  const orientationHelp = h("p", { class: "hint", text: "Vertical 9:16 ocupa toda la pantalla en móviles (Reels, TikTok). El relieve y la ruta se adaptan al formato." });
   const submit = h("button", { class: "btn primary", type: "submit", text: "Crear vídeo" });
 
   const form = h("form", { class: "form", novalidate: true, onsubmit: async e => {
@@ -580,8 +589,11 @@ function renderUpload() {
     if (!file) return void (error.textContent = "Elige primero un archivo GPX.");
     const data = new FormData();
     data.set("file", file);
+    const t = titleInput.value.trim();
+    if (t) data.set("title", t);
     data.set("camera_style", form.elements.camera_style.value);
     data.set("resolution", form.elements.resolution.value);
+    data.set("orientation", form.elements.orientation.value);
     data.set("animation_speed", speed.value);
     if (moments.length) {
       data.set("moments", JSON.stringify(moments.map((m, i) => {
@@ -601,14 +613,21 @@ function renderUpload() {
       submit.disabled = false; submit.textContent = "Crear vídeo";
     }
   } },
+    h("fieldset", {}, h("legend", { text: "Nombre del vídeo" }),
+      h("label", { text: "Título (opcional) — se usa como nombre del vídeo en tu biblioteca" }, titleInput),
+      h("p", { class: "hint", text: "Si lo dejas vacío se usa el nombre del archivo GPX. Máx. 120 caracteres." })),
     drop, input, momentsSection,
     h("fieldset", {}, h("legend", { text: "Cámara" }), h("div", { class: "options" },
       option("camera_style", "follow", "Seguimiento", "Vuela detrás del recorrido", true),
       option("camera_style", "orbit", "Órbita", "Gira alrededor de tu posición"),
       option("camera_style", "overhead", "Cenital", "Desde arriba, norte al frente"))),
+    h("fieldset", {}, h("legend", { text: "Formato" }), h("div", { class: "options" },
+      option("orientation", "horizontal", "Horizontal 16:9", "YouTube, TV — panorámico", true),
+      option("orientation", "vertical", "Vertical 9:16", "Reels / TikTok / Shorts — pantalla completa"))),
     h("fieldset", {}, h("legend", { text: "Resolución" }), h("div", { class: "options" },
       option("resolution", "1080p", "1080p", "Máxima calidad, tarda más", true),
       option("resolution", "720p", "720p", "Más rápido y ligero"))),
+    orientationHelp,
     h("fieldset", {}, h("legend", { text: "Velocidad de la animación" }),
       h("div", { class: "range-row" }, speed, speedOut),
       h("p", { class: "hint", text: "A 1× el vídeo dura entre 20 y 90 s según la distancia; a 2× dura la mitad. Los momentos se suman a esa duración." })),

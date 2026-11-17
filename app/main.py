@@ -51,6 +51,7 @@ from .schemas import (
     JobInfo,
     JobStatus,
     LoginRequest,
+    Orientation,
     RenderOptions,
     Resolution,
     StoredVideo,
@@ -130,11 +131,22 @@ async def domain_error_handler(_: Request, exc: GPXRenderError) -> JSONResponse:
     )
 
 
-def _title_from_filename(filename: str | None) -> str:
-    """Título legible a partir del nombre del archivo subido (sin ruta, extensión ni caracteres de control)."""
-    stem = PurePath((filename or "").replace("\\", "/")).stem
+def _sanitize_title(raw: str | None, fallback_filename: str | None = None) -> str:
+    """Normaliza un título aportado por el usuario o derivado del nombre del fichero."""
+    if raw is not None:
+        candidate = "".join(ch for ch in raw if ch.isprintable()).strip()
+        candidate = " ".join(candidate.split())
+        if candidate:
+            return candidate[:120]
+    stem = PurePath((fallback_filename or "").replace("\\", "/")).stem
     clean = "".join(ch for ch in stem if ch.isprintable()).strip()
+    clean = " ".join(clean.split())
     return clean[:120] or "ruta"
+
+
+def _title_from_filename(filename: str | None) -> str:
+    """Compat: título derivado solo del nombre de fichero."""
+    return _sanitize_title(None, filename)
 
 
 async def _read_upload(file: UploadFile) -> bytes:
@@ -258,8 +270,10 @@ _ERRORS: dict[int | str, dict[str, object]] = {
 async def render_gpx(
     request: Request,
     file: UploadFile = File(..., description="Archivo .gpx con el track"),
+    title: str | None = Form(None, max_length=120, description="Nombre del vídeo (opcional, máx. 120 caracteres)"),
     animation_speed: float = Form(1.0, ge=0.5, le=4.0, description="Multiplicador de velocidad de la animación"),
     resolution: Resolution = Form(Resolution.P1080, description="Resolución del vídeo"),
+    orientation: Orientation = Form(Orientation.HORIZONTAL, description="Orientación del lienzo: horizontal (16:9) o vertical (9:16) para redes sociales"),
     camera_style: CameraStyle = Form(CameraStyle.FOLLOW, description="Estilo de cámara"),
     moments: str | None = Form(
         None,
@@ -284,7 +298,7 @@ async def render_gpx(
         ServerBusyError: 503 si la cola global está llena (``GPX_MAX_QUEUED_RENDERS``).
     """
     _check_quotas(user)
-    options = RenderOptions(animation_speed=animation_speed, resolution=resolution, camera_style=camera_style)
+    options = RenderOptions(animation_speed=animation_speed, resolution=resolution, camera_style=camera_style, orientation=orientation)
     data = await _read_upload(file)
     # Parsing y filtrado son CPU-bound: fuera del event loop.
     track = await run_in_threadpool(process_gpx, data, options, settings)
@@ -308,7 +322,7 @@ async def render_gpx(
         job_id=uuid.uuid4().hex,
         options=options,
         track=track,
-        title=_title_from_filename(file.filename),
+        title=_sanitize_title(title, file.filename),
         owner=user.name,
         moments=prepared,
         media_dir=media_dir,

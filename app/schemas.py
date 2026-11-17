@@ -28,6 +28,13 @@ class CameraStyle(str, Enum):
     OVERHEAD = "overhead"  # Vista cenital con el norte arriba
 
 
+class Orientation(str, Enum):
+    """Orientación del lienzo de salida."""
+
+    HORIZONTAL = "horizontal"  # 16:9 paisaje
+    VERTICAL = "vertical"  # 9:16 retrato para redes sociales (Reels/TikTok/Shorts)
+
+
 class RenderOptions(BaseModel):
     """Parámetros opcionales de la animación."""
 
@@ -38,6 +45,16 @@ class RenderOptions(BaseModel):
     )
     resolution: Resolution = Resolution.P1080
     camera_style: CameraStyle = CameraStyle.FOLLOW
+    orientation: Orientation = Orientation.HORIZONTAL
+
+    def dimensions(self) -> tuple[int, int]:
+        """(ancho, alto) efectivos según resolución + orientación."""
+        w, h = self.resolution.size
+        if self.orientation is Orientation.VERTICAL:
+            w, h = h, w  # 1280x720 -> 720x1280, 1920x1080 -> 1080x1920
+            # asegurar par para yuv420p (ya lo son, pero por si se añaden otras resoluciones)
+            w, h = (w // 2) * 2, (h // 2) * 2
+        return w, h
 
 
 class MomentSpec(BaseModel):
