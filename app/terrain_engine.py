@@ -495,28 +495,67 @@ class Terrain3DEngine:
             detail=" | ".join(errors),
         )
 
+    @staticmethod
+    def _smooth_heading_deg(heading_deg: FloatArray, sigma: float) -> FloatArray:
+        """Suaviza ángulos circulares vía componentes sin/cos para evitar salto 359°→0°."""
+        rad = np.deg2rad(heading_deg)
+        s = np.sin(rad)
+        c = np.cos(rad)
+        s_f = gaussian_filter1d(s, sigma=sigma, mode="nearest")
+        c_f = gaussian_filter1d(c, sigma=sigma, mode="nearest")
+        return np.rad2deg(np.arctan2(s_f, c_f)) % 360.0
+
     def _camera_path(self, payload: RenderPayload, terrain: TerrainData, targets: FloatArray) -> FloatArray:
-        """Posición de la cámara por fotograma: según estilo, sin atravesar montañas y suavizada."""
+        """Posición de la cámara por fotograma: según estilo, sin atravesar montañas y suavizada.
+
+        Para cenital el movimiento es solo traslación cenital siguiendo el punto.
+        Los giros bruscos se deben a que la trayectoria del punto puede tener codos
+        cerrados; se suaviza fuertemente el path del objetivo y de los ojos para
+        que la cámara no dé bandazos.
+        """
         cfg = payload.camera
         n = len(payload.frames)
         heading = np.fromiter((f.heading for f in payload.frames), np.float64, n)
         t = np.fromiter((f.t for f in payload.frames), np.float64, n)
+        # --- Azimuth suavizado ---
         if cfg.style is CameraStyle.FOLLOW:
-            azimuth = np.deg2rad(heading)
+            # FOLLOW: la cámara mira en la dirección del rumbo; el rumbo crudo puede
+            # oscilar en horquillas cerradas → suavizado extra 1.8s para yaw tranquilo
+            sigma_yaw = payload.fps * 1.8
+            heading_sm = self._smooth_heading_deg(heading, sigma=sigma_yaw)
+            azimuth = np.deg2rad(heading_sm)
         elif cfg.style is CameraStyle.ORBIT:
+            # ORBIT: giro constante + rumbo inicial; el componente orbital es
+            # determinista y ya es suave, solo necesita un ligero filtrado
             azimuth = np.deg2rad(heading[0] + cfg.orbit_deg_per_s * t)
         else:
             azimuth = np.zeros(n)
+
+        # Para cenital el target también se suaviza: la cámara sigue una
+        # versión filtrada del recorrido y no el punto exacto, eliminando
+        # sacudidas en curvas de 90° o zig-zags de sendero
+        if cfg.style is CameraStyle.OVERHEAD:
+            sigma_tgt = payload.fps * 1.2  # ~1.2s de anticipación
+            # suavizar solo XY (Z viene del relieve, no se filtra para mantener altura real)
+            tgt_xy = gaussian_filter1d(targets[:, :2], sigma=sigma_tgt, axis=0, mode="nearest")
+            targets_eff = np.column_stack((tgt_xy, targets[:, 2]))
+        else:
+            targets_eff = targets
+
         pitch = math.radians(cfg.pitch_deg)
         horizontal = cfg.distance_m * math.cos(pitch)
         eyes = np.column_stack(
             (
-                targets[:, 0] - horizontal * np.sin(azimuth),
-                targets[:, 1] - horizontal * np.cos(azimuth),
-                targets[:, 2] + cfg.distance_m * math.sin(pitch),
+                targets_eff[:, 0] - horizontal * np.sin(azimuth),
+                targets_eff[:, 1] - horizontal * np.cos(azimuth),
+                targets_eff[:, 2] + cfg.distance_m * math.sin(pitch),
             )
         )
-        sigma = payload.fps * 1.0
+        # Suavizado de los ojos: más fuerte en cenital (la traslación es todo el movimiento)
+        if cfg.style is CameraStyle.OVERHEAD:
+            sigma = payload.fps * 2.4  # ~2.4s → paneo muy fluido sin tirones
+        else:
+            sigma = payload.fps * 1.4  # follow/orbit también algo más suave que antes (1.0→1.4)
         eyes = gaussian_filter1d(eyes, sigma=sigma, axis=0, mode="nearest")
         # Altura mínima sobre el terreno bajo la cámara (suavizada para que no dé tirones)
         clearance = max(0.12 * cfg.distance_m, 60.0)

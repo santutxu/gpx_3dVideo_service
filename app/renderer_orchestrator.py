@@ -403,23 +403,40 @@ def _camera_config(style: CameraStyle, track: ProcessedTrack) -> CameraConfig:
     return CameraConfig(style=style, distance_m=round(float(np.clip(extent * 0.3, 700.0, 6000.0)), 1), pitch_deg=33.0)
 
 
+def _smooth_heading_deg(heading_deg: np.ndarray, sigma: float) -> np.ndarray:
+    """Suaviza ángulos circulares vía sin/cos para evitar el salto 359→0."""
+    from scipy.ndimage import gaussian_filter1d as _g
+
+    rad = np.deg2rad(heading_deg)
+    return np.rad2deg(np.arctan2(_g(np.sin(rad), sigma=sigma, mode="nearest"), _g(np.cos(rad), sigma=sigma, mode="nearest"))) % 360.0
+
+
 def _camera_positions(cfg: CameraConfig, track: ProcessedTrack) -> np.ndarray:
     """Posición (x, y, z) de la cámara en cada fotograma, mirando al punto activo."""
+    # Para FOLLOW el rumbo crudo puede dar bandazos en horquillas; se suaviza el yaw ~1.8s
     if cfg.style is CameraStyle.FOLLOW:
-        azimuth = np.deg2rad(track.heading_deg)  # dirección hacia la que mira la cámara
+        # track.heading_deg ya viene suavizado 0.75s en gpx_processor; añadimos ~1.8s extra aquí
+        hdg = _smooth_heading_deg(track.heading_deg, sigma=track.fps * 1.8)
+        azimuth = np.deg2rad(hdg)
     elif cfg.style is CameraStyle.ORBIT:
         azimuth = np.deg2rad(track.heading_deg[0] + cfg.orbit_deg_per_s * track.video_t)
     else:
-        azimuth = np.zeros(track.frame_count)  # norte arriba
+        azimuth = np.zeros(track.frame_count)  # norte arriba (OVERHEAD): sin yaw, paneo cenital puro
     pitch = np.deg2rad(cfg.pitch_deg)
     ground = cfg.distance_m * np.cos(pitch)
-    return np.column_stack(
+    eyes = np.column_stack(
         (
             track.x - ground * np.sin(azimuth),
             track.y - ground * np.cos(azimuth),
             track.ele * cfg.vertical_exaggeration + cfg.distance_m * np.sin(pitch),
         )
     )
+    # Suavizado extra de la trayectoria de ojos: más fuerte en OVERHEAD (toda la sensación de movimiento es traslación)
+    if cfg.style is CameraStyle.OVERHEAD:
+        from scipy.ndimage import gaussian_filter1d as _g
+
+        eyes = _g(eyes, sigma=track.fps * 2.0, axis=0, mode="nearest")
+    return eyes
 
 
 def create_engine(settings: Settings) -> RenderEngine:
