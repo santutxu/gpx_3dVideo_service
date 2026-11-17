@@ -475,10 +475,11 @@ function renderHome() {
     list.querySelector("tbody").replaceChildren(h("tr", {}, h("td", { colspan: 5, text: "Cargando…" })));
     try {
       const jobs = await api("/jobs");
-      const videos = await api("/videos");
-      const completed = videos.filter(v => v.owner === state.user.name);
-      const totalDist = jobs.reduce((a, b) => a + (b.track?.total_distance_m || 0), 0) / 1000;
-      const totalDur = jobs.reduce((a, b) => a + (b.total_duration_s || 0), 0);
+      const vids = await api("/videos?limit=200");
+      const items = Array.isArray(vids) ? vids : (vids.items || []);
+      const completed = items.filter(v => !v.owner || v.owner === state.user.name);
+      const totalDist = jobs.reduce((a, b) => a + (b.metrics?.total_distance_m || 0), 0) / 1000;
+      const totalDur = jobs.reduce((a, b) => a + (b.video_duration_s || b.metrics?.duration_s || 0), 0);
       const moments = jobs.reduce((a, b) => a + (b.moment_count || 0), 0) + completed.reduce((a, b) => a + (b.moment_count || 0), 0);
       
       stats.replaceChildren(
