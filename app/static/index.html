@@ -2,10 +2,12 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#080b10">
 <title>Cumbre · Vídeos 3D de tus rutas</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff5c1e'/%3E%3Cpath d='M5 24l8-13 4 6 3-4 7 11z' fill='%23fff'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="static/app.css?v=6">
+<link rel="stylesheet" href="static/app.css?v=7">
 </head>
 <body>
 
@@ -38,10 +40,23 @@
   </div>
 </section>
 
+<!-- Header móvil -->
+<header id="mobile-header" class="mobile-header" hidden>
+  <button id="menu-toggle" class="icon-btn" aria-label="Abrir menú" aria-expanded="false" aria-controls="sidebar">
+    <span class="burger" aria-hidden="true"><i></i><i></i><i></i></span>
+  </button>
+  <div class="brand"><span class="logo" aria-hidden="true"></span>Cumbre</div>
+  <span class="mobile-spacer" aria-hidden="true"></span>
+</header>
+<div id="sidebar-overlay" class="sidebar-overlay" hidden></div>
+
 <!-- Aplicación -->
 <div id="app" class="app" hidden>
-  <aside class="sidebar">
-    <div class="brand"><span class="logo" aria-hidden="true"></span>Cumbre</div>
+  <aside id="sidebar" class="sidebar" aria-label="Navegación principal">
+    <div class="sidebar-head">
+      <div class="brand"><span class="logo" aria-hidden="true"></span>Cumbre</div>
+      <button id="menu-close" class="icon-btn close" aria-label="Cerrar menú">✕</button>
+    </div>
     <nav id="nav" aria-label="Secciones">
       <button data-view="home"><span class="ico ico-home" aria-hidden="true"></span>Inicio</button>
       <button data-view="routes"><span class="ico ico-routes" aria-hidden="true"></span>Rutas</button>
@@ -82,6 +97,6 @@
 </dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="static/app.js?v=6"></script>
+<script src="static/app.js?v=7"></script>
 </body>
 </html>

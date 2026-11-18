@@ -96,6 +96,8 @@ function setAuthMode(mode) {
 
 function showAuth() {
   stopPolling();
+  setDrawer(false);
+  const mh=$("mobile-header"); if(mh) mh.hidden=true;
   $("app").hidden = true;
   $("auth").hidden = false;
   $("tab-register").hidden = !state.registrationOpen;
@@ -136,17 +138,29 @@ $("logout").onclick = async () => {
   showAuth();
 };
 
-// ---------- Estructura ----------
+// ---------- Estructura + Responsive drawer ----------
+function setDrawer(open){
+  const sb=$("sidebar"), ov=$("sidebar-overlay"), btn=$("menu-toggle");
+  if(!sb) return;
+  sb.classList.toggle("open", open);
+  if(ov) ov.hidden=!open;
+  if(btn) btn.setAttribute("aria-expanded", String(open));
+  document.body.style.overflow = open && window.matchMedia("(max-width:1024px)").matches ? "hidden" : "";
+}
+$("menu-toggle")?.addEventListener("click", ()=> setDrawer(!$("sidebar")?.classList.contains("open")));
+$("menu-close")?.addEventListener("click", ()=> setDrawer(false));
+$("sidebar-overlay")?.addEventListener("click", ()=> setDrawer(false));
+window.addEventListener("keydown", e=>{ if(e.key==="Escape") setDrawer(false); });
+window.addEventListener("resize", ()=>{ if(window.innerWidth>1024) setDrawer(false); });
+
 function showApp() {
   $("auth").hidden = true;
   $("app").hidden = false;
+  const mh=$("mobile-header"); if(mh) mh.hidden=false;
   $("who-name").textContent = state.user.name;
   $("who-role").textContent = state.user.is_admin ? "Administrador" : "Usuario";
   $("avatar").textContent = state.user.name.slice(0, 1);
   $("logout").hidden = state.user.name === "anonymous";
-  const navHome = h("button", { dataView: "home", text: "Inicio", "aria-label": "Inicio" }, h("span", { class: "ico ico-home", "aria-hidden": "true" }));
-  $("nav").replaceChildren(navHome, ...[...$("nav").children]);
-  if (state.user.name !== "anonymous") { $("nav-users").hidden = !(state.user.is_admin); } else { $("nav-users").hidden = true; }
   $("nav-users").hidden = !(state.user.is_admin && state.user.name !== "anonymous");
   navigate("routes");
 }
@@ -157,6 +171,7 @@ function navigate(view) {
   for (const b of $("nav").querySelectorAll("button")) {
     if (b.dataset.view === view) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   }
+  setDrawer(false);
   stopPolling();
   if (activeMap) { activeMap.destroy(); activeMap = null; }
   views[view]();
