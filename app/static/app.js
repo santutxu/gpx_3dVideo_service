@@ -165,7 +165,7 @@ function showApp() {
   navigate("routes");
 }
 
-const views = { home: renderHome, routes: renderRoutes, upload: renderUpload, keys: renderKeys, account: renderAccount, users: renderUsers };
+const views = { home: renderHome, routes: renderRoutes, upload: renderUpload, polar: renderPolar, keys: renderKeys, account: renderAccount, users: renderUsers };
 function navigate(view) {
   state.view = view;
   for (const b of $("nav").querySelectorAll("button")) {
@@ -842,6 +842,94 @@ function renderAccount() {
     error,
     h("div", {}, h("button", { class: "btn primary", type: "submit", text: "Cambiar contraseña" })));
   $("main").replaceChildren(head, profile, h("div", { class: "card panel" }, h("h2", { text: "Contraseña" }), form));
+}
+
+// ---------- Polar ----------
+async function renderPolar() {
+  const main = $("main");
+  // toast si viene de OAuth callback
+  if (new URLSearchParams(location.search).get("polar") === "connected") {
+    toast("Cuenta Polar conectada.");
+    history.replaceState(null, "", location.pathname);
+  }
+  main.replaceChildren(pageHead("Polar", "Sincroniza tus entrenos con GPS y crea vídeos sin subir GPX a mano."), h("p", { class: "muted", text: "Cargando…" }));
+  let health;
+  try { health = await api("/../health"); } catch {}
+  // health polar_enabled viene de /health (no de /auth/config)
+  let polarEnabled = true;
+  try { const h = await (await fetch("health")).json(); polarEnabled = !!h.polar_enabled; } catch {}
+  // fallback: si el backend no expone, asumir true si el endpoint responde
+  if (!polarEnabled) {
+    main.replaceChildren(pageHead("Polar", "Integración Polar no configurada en el servidor."),
+      h("div", { class: "card panel" }, h("p", { class: "muted", text: "El administrador debe configurar GPX_POLAR_ENABLED=1, GPX_POLAR_CLIENT_ID/SECRET y GPX_POLAR_REDIRECT_URL en /opt/gpx_render/.env y reiniciar." })));
+    return;
+  }
+  let status;
+  try { status = await api("/polar/status"); } catch (e) { main.lastChild.textContent = e.message; return; }
+
+  if (!status.connected) {
+    const btn = h("button", { class: "btn primary", text: "Conectar cuenta Polar", onclick: async () => {
+      btn.disabled = true; btn.textContent = "Redirigiendo…";
+      try {
+        const r = await api("/polar/auth-url");
+        location.href = r.auth_url;
+      } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = "Conectar cuenta Polar"; }
+    }});
+    main.replaceChildren(pageHead("Polar", "Conecta tu cuenta Polar Flow para importar rutas con GPS."),
+      h("div", { class: "card panel" }, h("h2", { text: "Conectar Polar" }),
+        h("p", { class: "muted", text: "Se te redirigirá a flow.polar.com para autorizar acceso de lectura a tus entrenos (accesslink.read_all). El token no expira y puedes revocarlo en Polar → Ajustes." }),
+        h("div", { style: "margin-top:12px" }, btn)),
+      h("div", { class: "card panel" }, h("h2", { text: "Cómo funciona" }),
+        h("ul", {}, h("li", { text: "Autorizas una vez." }), h("li", { text: "Cumbre lista tus últimos 30 días de entrenos." }), h("li", { text: "Importas los que tienen ruta GPS → se crea un vídeo como si hubieras subido el GPX." }))));
+    return;
+  }
+
+  // Conectado → listar ejercicios
+  const head = pageHead("Polar", `Conectado como Polar #${status.polar_user_id} · Última sync: ${status.last_sync_at ? dateTime(status.last_sync_at) : "nunca"}`,
+    h("button", { class: "btn small", text: "Desconectar", onclick: async () => {
+      if (!await confirmDialog("Desconectar Polar", "Se borrará el token y el historial de importados. Podrás reconectar.")) return;
+      try { await api("/polar/disconnect", { method: "POST" }); toast("Desconectado"); renderPolar(); } catch (e) { toast(e.message, true); }
+    }}));
+
+  const syncBtn = h("button", { class: "btn primary", text: "Sincronizar últimos 30 días (batch)" });
+  const listWrap = h("div", { class: "card panel" }, h("h2", { text: "Entrenos con ruta GPS" }), h("p", { class: "muted", text: "Cargando…" }));
+  main.replaceChildren(head, h("div", { class: "card panel", style: "display:flex;gap:12px;align-items:center" }, syncBtn, h("span", { class: "muted", text: "Solo entrenos con GPS pueden convertirse en vídeo (GPX)." })), listWrap);
+
+  async function load() {
+    listWrap.lastChild.textContent = "Cargando…";
+    try {
+      const exs = await api("/polar/exercises?only_with_route=true");
+      if (state.view !== "polar") return;
+      if (!exs.length) { listWrap.lastChild.textContent = "No hay entrenos con ruta en los últimos 30 días."; return; }
+      const rows = exs.map(e => {
+        const isDone = e.already_imported;
+        return h("tr", {},
+          h("td", {}, e.start_time ? dateOnly(e.start_time) : "—"),
+          h("td", {}, e.sport || "—"),
+          h("td", {}, e.distance_m ? km(e.distance_m) + " km" : "—"),
+          h("td", {}, e.has_route ? "Sí" : "No"),
+          h("td", {}, isDone ? h("span", { class: "badge plain", text: "Importado" }) : h("span", { class: "badge", text: "Nuevo" })),
+          h("td", {}, isDone ? h("span", { class: "muted", text: "—" }) : h("button", { class: "btn small", text: "Importar", onclick: async (ev) => {
+            const btn = ev.target; btn.disabled = true; btn.textContent = "Importando…";
+            try { const r = await api(`/polar/import/${e.id}`, { method: "POST" }); toast(`Vídeo creado: ${r.title}`); e.already_imported = true; load(); } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = "Importar"; }
+          }}))
+        );
+      });
+      listWrap.replaceChildren(h("h2", { text: `Entrenos con ruta GPS (${exs.length})` }),
+        h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, ["Fecha","Deporte","Dist.","Ruta","Estado",""].map(t=>h("th",{text:t})))), h("tbody", {}, rows))));
+    } catch (e) { listWrap.lastChild.textContent = e.message; }
+  }
+  syncBtn.onclick = async () => {
+    syncBtn.disabled = true; syncBtn.textContent = "Sincronizando…";
+    try {
+      const r = await api("/polar/sync?limit=20&only_with_route=true", { method: "POST" });
+      toast(`Sincronizados: ${r.imported} nuevos, ${r.skipped_already_imported} ya importados, ${r.failed} fallos`);
+      if (r.imported) setTimeout(()=> navigate("routes"), 800);
+      load();
+    } catch (e) { toast(e.message, true); }
+    finally { syncBtn.disabled = false; syncBtn.textContent = "Sincronizar últimos 30 días (batch)"; }
+  };
+  load();
 }
 
 // ---------- Arranque ----------
