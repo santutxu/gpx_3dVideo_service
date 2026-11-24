@@ -8,9 +8,6 @@ import time
 from .exceptions import RenderTimeoutError
 
 
-
-
-
 class Deadline:
     """Deadline thread-local: cada worker tiene su propio plazo."""
 

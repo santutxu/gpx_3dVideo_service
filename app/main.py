@@ -815,6 +815,10 @@ async def legacy_gallery() -> RedirectResponse:
 
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
+# Polar (si está habilitado, se monta igual y cada endpoint comprueba GPX_POLAR_ENABLED)
+from .polar.router import router as polar_router  # noqa: E402
+app.include_router(polar_router)
+
 
 @app.get("/health", tags=["sistema"])
 async def health() -> dict[str, object]:
@@ -824,4 +828,5 @@ async def health() -> dict[str, object]:
         "version": __version__,
         "ffmpeg_available": shutil.which(settings.ffmpeg_binary) is not None,
         "render_engine": settings.render_engine,
+        "polar_enabled": settings.polar_enabled,
     }
