@@ -8,4 +8,3 @@ numpy==2.5.4
 scipy==1.18.1
 pillow==13.0.0
 moderngl==5.13.0
-httpx==0.28.1
